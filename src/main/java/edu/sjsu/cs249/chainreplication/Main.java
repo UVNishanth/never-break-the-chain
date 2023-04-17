@@ -98,11 +98,14 @@ public class Main {
 
         static boolean predecessorChanged;
 
-        boolean successorChanged;
+        static boolean successorChanged;
 
         static int DEADLINE = 10;
 
         static int LOCK_WAIT = 10;
+
+        static ManagedChannel succChannel;
+        static ManagedChannel predChannel;
 
 
         //
@@ -128,12 +131,12 @@ public class Main {
             serverPort = Integer.valueOf(serverHostPort.split(":")[1]);
             System.out.printf("listening on %d\n", serverPort);
             var server = ServerBuilder.forPort(serverPort).intercept(new ServerInterceptor() {
-                @Override
-                public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(ServerCall<ReqT, RespT> sc, Metadata h, ServerCallHandler<ReqT, RespT> next) {
-                    var remote = sc.getAttributes().get(TRANSPORT_ATTR_REMOTE_ADDR);
-                    return Contexts.interceptCall(Context.current().withValue(REMOTE_ADDR, remote), sc, h, next);
-                }
-            }).addService(new ChainReplicaService()).addService(new HeadChainReplicaService())
+                        @Override
+                        public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(ServerCall<ReqT, RespT> sc, Metadata h, ServerCallHandler<ReqT, RespT> next) {
+                            var remote = sc.getAttributes().get(TRANSPORT_ATTR_REMOTE_ADDR);
+                            return Contexts.interceptCall(Context.current().withValue(REMOTE_ADDR, remote), sc, h, next);
+                        }
+                    }).addService(new ChainReplicaService()).addService(new HeadChainReplicaService())
                     .addService(new TailChainReplicaService()).addService(new ChainDebugService()).build();
             server.start();
             server.awaitTermination();
@@ -152,15 +155,24 @@ public class Main {
             System.out.println("lastXid Value: " + lastXid);
             System.out.println("Pending requests after ack: ");
             System.out.println(updateRequests);
+            if (isHead) {
+                var ackXid = ack.getXid();
+                System.out.println("ackXid: " + ackXid);
+                System.out.println("Sending ack for " + ackXid + " to the client...");
+                //System.out.println("Response Map list: ");
+                //System.out.println(responseObserverMap);
+                StreamObserver<HeadResponse> responseToClient = responseObserverMap.get(ackXid);
+                responseToClient.onNext(HeadResponse.newBuilder().setRc(0).build());
+                responseToClient.onCompleted();
+            } else {
+                System.out.println("Sending Ack Request to pred");
+                sendAckRequestToPredecessor(ack);
+            }
+
         }
 
         static void sendUpdateRequestToSuccessor(UpdateRequest req) {
-            var server = successorServerInfo;
-            var lastColon = server.lastIndexOf(':');
-            var host = server.substring(0, lastColon);
-            var port = Integer.parseInt(server.substring(lastColon + 1));
-            var channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build();
-            var stub = ReplicaGrpc.newBlockingStub(channel);
+            var stub = ReplicaGrpc.newBlockingStub(succChannel);
 //            if(lock.isHeldByCurrentThread()){
 //                lock.unlock();
 //            }
@@ -179,6 +191,26 @@ public class Main {
             System.out.println("Updated hash table: \n" + hashtable);
             lastXid = req.getXid();
             System.out.println("lastXid Value: " + lastXid);
+            if (!isTail) {
+                System.out.println("Sending Update Request to succ");
+                sendUpdateRequestToSuccessor(req);
+            } else {
+                lastAck = req.getXid();
+                System.out.println("I am the tail.. So sending Ack for request back to pred");
+                AckRequest ack = AckRequest.newBuilder().setXid(lastAck).build();
+                handleAckRequest(ack);
+                //sendAckRequestToPredecessor(ack);
+            }
+        }
+
+        static void sendAckRequestToPredecessor(AckRequest req) {
+            var stub = ReplicaGrpc.newBlockingStub(predChannel);
+//                if(lock.isHeldByCurrentThread()){
+//                    lock.unlock();
+//                }
+            AckResponse response = stub.withDeadlineAfter(DEADLINE, TimeUnit.SECONDS)
+                    .ack(req);
+
         }
 
 
@@ -193,7 +225,7 @@ public class Main {
                     System.out.println(e);
                 });
                 serverInfo = serverHostPort;
-                System.out.println("Server info is: "+serverInfo);
+                System.out.println("Server info is: " + serverInfo);
                 createControlNode();
             }
 
@@ -237,8 +269,8 @@ public class Main {
 
             void getReplicaList() {
                 //try {
-                    //if(lock.tryLock(50, TimeUnit.SECONDS)) {
-                        zk.getChildren(controlpath, replicaListWatcher, getReplicaListCallback, null);
+                //if(lock.tryLock(50, TimeUnit.SECONDS)) {
+                zk.getChildren(controlpath, replicaListWatcher, getReplicaListCallback, null);
 //                    }
 //                } catch (InterruptedException e) {
 //                    throw new RuntimeException(e);
@@ -250,10 +282,10 @@ public class Main {
 
             Watcher replicaListWatcher = e -> {
                 try {
-                    if(lock.tryLock(LOCK_WAIT, TimeUnit.SECONDS)) {
+                    if (lock.tryLock(LOCK_WAIT, TimeUnit.SECONDS)) {
                         System.out.println("Something changed in the chain. Reading from " + controlpath + "...");
                         getReplicaList();
-                        //lock.unlock();
+                        lock.unlock();
                     }
                 } catch (InterruptedException ex) {
                     throw new RuntimeException(ex);
@@ -285,9 +317,7 @@ public class Main {
                         replicas = children;
 
                         sortReplicaList();
-                        if(lock.isHeldByCurrentThread()){
-                            lock.unlock();
-                        }
+
                         //lock.unlock();
                         int replicaSize = children.size();
                         System.out.println("ReplicaSize: " + replicaSize);
@@ -296,12 +326,6 @@ public class Main {
                         if (myPositionInTheChain == replicaSize - 1) {
                             System.out.println("I am the tail now...");
                             isTail = true;
-                            if (lastAck < lastXid){
-                                System.out.println("My lastXid wasn't acked. Acking now and sending ack to pred");
-                                AckRequest req = AckRequest.newBuilder().setXid(lastXid).build();
-                                sendAckRequestToPredecessor(req);
-                            }
-                            lastAck = lastXid;
                         } else {
                             isTail = false;
                         }
@@ -314,11 +338,22 @@ public class Main {
                         if (!isHead) {
                             getPredecessor(myPositionInTheChain);
                             if (predecessorChanged) {
+//                                if(lock.isHeldByCurrentThread()){
+//                                    lock.unlock();
+//                                }
                                 sayHiToPredecessor();
                             }
                         }
                         if (!isTail) {
                             getSuccessor(myPositionInTheChain);
+                        }
+                        if (isTail) {
+                            if (lastAck < lastXid && !updateRequests.isEmpty()) {
+                                System.out.println("My lastXid wasn't acked. Acking now and sending ack to pred");
+                                AckRequest req = AckRequest.newBuilder().setXid(lastXid).build();
+                                handleAckRequest(req);
+                            }
+                            lastAck = lastXid;
                         }
 
                     }
@@ -336,7 +371,7 @@ public class Main {
                 //var channel = channelList.computeIfAbsent(server, s -> ManagedChannelBuilder.forAddress(host, port)
                 //        .usePlaintext().build());
                 var stub = ReplicaGrpc.newBlockingStub(channel);
-
+                System.out.println("Sending new predecessor a new succ req");
                 NewSuccessorResponse response = stub.withDeadlineAfter(DEADLINE, TimeUnit.SECONDS)
                         .newSuccessor(NewSuccessorRequest.newBuilder().setLastZxidSeen(lastZxidSeen).
                                 setLastXid(lastXid).setLastAck(lastAck).setZnodeName(znodeName).build());
@@ -350,13 +385,20 @@ public class Main {
                 }
                 if (response.getRc() == 0) {
                     //hashtable = (HashMap<String, Integer>) response.getStateMap();
+                    System.out.println("Predecessor has accepted that I am the new tail");
                     hashtable.putAll(response.getStateMap());
                 }
+                System.out.println("Updating pending list as per new pred response: ");
                 var missingRequests = response.getSentList();
                 for (var req : missingRequests) {
                     handleRequest(req);
                 }
                 lastXid = response.getLastXid();
+                System.out.println("State after receiving new pred response: ");
+                System.out.println("Pending list: ");
+                System.out.println(updateRequests);
+                System.out.println("Hashtable: ");
+                System.out.println(hashtable);
             }
 
             void sortReplicaList() {
@@ -396,12 +438,34 @@ public class Main {
 
                 System.out.println("Pred Server Info: " + predecessorServerInfo);
 
+                var server = predecessorServerInfo;
+                var lastColon = server.lastIndexOf(':');
+                var host = server.substring(0, lastColon);
+                var port = Integer.parseInt(server.substring(lastColon + 1));
+                predChannel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build();
+
+
             }
 
             void getSuccessor(int replicaPosition) {
                 int successorPosition = replicaPosition + 1;
+                String prevSuccessorReplicaName = "";
+                boolean isNew = true;
+                if (successorReplicaName != null) {
+                    isNew = false;
+                    prevSuccessorReplicaName = successorReplicaName;
+                }
                 successorReplicaName = replicas.get(successorPosition);
-                System.out.println("My Successor is: " + successorReplicaName);
+                System.out.println("My Succ is: " + successorReplicaName);
+                if (isNew) {
+                    prevSuccessorReplicaName = successorReplicaName;
+                }
+                if (!isNew && prevSuccessorReplicaName.equals(successorReplicaName)) {
+                    successorChanged = false;
+                    return;
+                }
+                successorChanged = true;
+                System.out.println("I have a new successor");
                 //String succServerData;
                 try {
                     successorServerInfo = getReplicaServerInfo(successorReplicaName,
@@ -415,6 +479,14 @@ public class Main {
                 //successorServerInfo = succServerData.split("\n")[0];
 
                 System.out.println("Succ Server Info: " + successorServerInfo);
+
+                var server = successorServerInfo;
+                var lastColon = server.lastIndexOf(':');
+                var host = server.substring(0, lastColon);
+                var port = Integer.parseInt(server.substring(lastColon + 1));
+                System.out.println("I am here...");
+                succChannel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build();
+
 
             }
 
@@ -435,10 +507,10 @@ public class Main {
 
             Watcher successorWatcher = e -> {
                 try {
-                    if(lock.tryLock(LOCK_WAIT, TimeUnit.SECONDS)) {
+                    if (lock.tryLock(LOCK_WAIT, TimeUnit.SECONDS)) {
                         System.out.println("Successor has changed...");
                         getReplicaList();
-                        //lock.unlock();
+                        lock.unlock();
                     }
                 } catch (InterruptedException ex) {
                     throw new RuntimeException(ex);
@@ -453,10 +525,10 @@ public class Main {
 
             Watcher predecessorWatcher = e -> {
                 try {
-                    if(lock.tryLock(LOCK_WAIT, TimeUnit.SECONDS)) {
+                    if (lock.tryLock(LOCK_WAIT, TimeUnit.SECONDS)) {
                         System.out.println("Predecessor has changed...");
                         getReplicaList();
-                        //lock.unlock();
+                        lock.unlock();
                     }
                 } catch (InterruptedException ex) {
                     throw new RuntimeException(ex);
@@ -490,36 +562,43 @@ public class Main {
                                 System.out.println("Successor name does not match even after sync. Ignore...");
                                 responseRc = -1;
                             }
-                        } else {
-                            getReplicaList();
                         }
+//                        else {
+//                            getReplicaList();
+//                        }
+                        System.out.println("Setting successor via chain...");
+                        getSuccessor(replicas.indexOf(znodeName));
                         if (responseRc != -1 && request.getLastXid() == -1) {
                             responseRc = 0;
-                        }
-                        if (responseRc == 0) {
-                            responseState = hashtable;
                         }
                         if (request.getLastXid() > lastXid) {
                             System.out.println("Succ has lastXid greater than me.. Error. shutdown..");
                             System.exit(1);
                         }
-                        if (responseRc != -1) {
+                        if (responseRc == 0) {
+                            responseState = hashtable;
+                            responseUpdateRequestList = new ArrayList<>(updateRequests.values());
+                            System.out.println("New successor is the new tail...");
+                        }
+                        if (responseRc == 1) {
                             for (var sendFrom = request.getLastXid() + 1; sendFrom <= lastXid; sendFrom++) {
                                 responseUpdateRequestList.add(updateRequests.get(sendFrom));
                             }
                             var reqLastAck = request.getLastAck();
                             //var ackFrom = lastAck + 1;
                             for (var ackFrom = lastAck + 1; ackFrom <= reqLastAck; ackFrom++) {
-                                updateRequests.remove(ackFrom);
+                                AckRequest ack = AckRequest.newBuilder().setXid(lastAck).build();
+                                handleAckRequest(ack);
                             }
                             lastAck = reqLastAck;
-
                         }
-
-                        System.out.println("Sending response");
+                        System.out.println("Sending response to new succ");
+                        System.out.println("Missing list to be sent: ");
+                        System.out.println(responseUpdateRequestList);
                         responseObserver.onNext(NewSuccessorResponse.newBuilder().setRc(responseRc).putAllState(responseState)
                                 .addAllSent(responseUpdateRequestList).setLastXid(lastXid).build());
                         responseObserver.onCompleted();
+
                         lock.unlock();
                     }
                 } catch (InterruptedException e) {
@@ -529,7 +608,7 @@ public class Main {
             }
 
             AsyncCallback.VoidCallback syncCallback = (rc, path, ctx) -> {
-                getReplicaList();
+                //getReplicaList();
             };
 
 //            void handleRequest(UpdateRequest req){
@@ -564,17 +643,6 @@ public class Main {
                         System.out.println("Received an Update request from pred");
                         System.out.println("Changing state...");
                         handleRequest(request);
-                        if (!isTail) {
-                            System.out.println("Sending Update Request to succ");
-                            sendUpdateRequestToSuccessor(request);
-                        }
-                        if (isTail) {
-                            lastAck = request.getXid();
-                            System.out.println("I am the tail.. So sending Ack for request back to pred");
-                            AckRequest req = AckRequest.newBuilder().setXid(lastAck).build();
-                            //handleAckRequest(req);
-                            sendAckRequestToPredecessor(req);
-                        }
                         lock.unlock();
                     }
                 } catch (InterruptedException e) {
@@ -587,25 +655,11 @@ public class Main {
                             StreamObserver<AckResponse> responseObserver) {
                 responseObserver.onNext(AckResponse.newBuilder().build());
                 responseObserver.onCompleted();
-                if (isHead) {
-                    var ackXid = request.getXid();
-                    System.out.println("ackXid: " + ackXid);
-                    System.out.println("Sending ack for "+ackXid+" to the client...");
-                    //System.out.println("Response Map list: ");
-                    //System.out.println(responseObserverMap);
-                    StreamObserver<HeadResponse> responseToClient = responseObserverMap.get(ackXid);
-                    responseToClient.onNext(HeadResponse.newBuilder().setRc(0).build());
-                    responseToClient.onCompleted();
-                }
                 try {
                     if (lock.tryLock(LOCK_WAIT, TimeUnit.SECONDS)) {
                         System.out.println("Received an Ack request from succ");
                         System.out.println("Changing state...");
                         handleAckRequest(request);
-                        if (!isHead) {
-                            System.out.println("Sending Ack Request to pred");
-                            sendAckRequestToPredecessor(request);
-                        }
                         lock.unlock();
                     }
                 } catch (InterruptedException e) {
@@ -613,20 +667,6 @@ public class Main {
                 }
             }
 
-            void sendAckRequestToPredecessor(AckRequest req) {
-                var server = predecessorServerInfo;
-                var lastColon = server.lastIndexOf(':');
-                var host = server.substring(0, lastColon);
-                var port = Integer.parseInt(server.substring(lastColon + 1));
-                var channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build();
-                var stub = ReplicaGrpc.newBlockingStub(channel);
-//                if(lock.isHeldByCurrentThread()){
-//                    lock.unlock();
-//                }
-                AckResponse response = stub.withDeadlineAfter(DEADLINE, TimeUnit.SECONDS)
-                        .ack(req);
-
-            }
 
         }
 
@@ -662,15 +702,14 @@ public class Main {
                         //System.out.println("Value updated. Now sending down the chain...");
                         UpdateRequest req = UpdateRequest.newBuilder().setKey(keyToBeUpdated).setNewValue(newValue)
                                 .setXid(lastXid).build();
-                        handleRequest(req);
                         responseObserverMap.put(lastXid, responseObserver);
-                        sendUpdateRequestToSuccessor(req);
+                        handleRequest(req);
+                        //sendUpdateRequestToSuccessor(req);
                         lock.unlock();
                     }
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
-                }
-                finally {
+                } finally {
 
                 }
             }
@@ -685,7 +724,7 @@ public class Main {
 
             @Override
             public void get(GetRequest request,
-                                  StreamObserver<GetResponse> responseObserver) {
+                            StreamObserver<GetResponse> responseObserver) {
                 System.out.println("Has received a read request. Checking if i am the tail...");
                 if (!isTail) {
                     System.out.println("I am not the tail. Letting the client know...");
@@ -695,7 +734,7 @@ public class Main {
                 }
                 var value = 0;
                 //TODO: after getting update request, if i am tail, i need to send ack request back
-                if(hashtable.containsKey(request.getKey())) {
+                if (hashtable.containsKey(request.getKey())) {
                     value = hashtable.get(request.getKey());
                 }
 //                hashtable.put(keyToBeUpdated, newValue);
@@ -715,13 +754,13 @@ public class Main {
 
             @Override
             public void debug(ChainDebugRequest request,
-                                  StreamObserver<ChainDebugResponse> responseObserver) {
+                              StreamObserver<ChainDebugResponse> responseObserver) {
                 try {
                     if (lock.tryLock(LOCK_WAIT, TimeUnit.SECONDS)) {
                         ArrayList<Integer> keys = new ArrayList<>(updateRequests.keySet());
                         Collections.sort(keys);
                         List<UpdateRequest> requestsList = new ArrayList<>();
-                        for (int k : keys){
+                        for (int k : keys) {
                             requestsList.add(updateRequests.get(k));
                         }
                         ArrayList<String> logs = new ArrayList<String>(Arrays.asList("Sending random debug info",
@@ -737,13 +776,11 @@ public class Main {
             }
 
             public void exit(ExitRequest request,
-                              StreamObserver<ExitResponse> responseObserver) {
+                             StreamObserver<ExitResponse> responseObserver) {
                 responseObserver.onNext(ExitResponse.newBuilder().build());
                 responseObserver.onCompleted();
             }
         }
-
-
 
 
     }

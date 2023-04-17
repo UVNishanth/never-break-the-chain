@@ -4,6 +4,7 @@ zk : java -jar zookeeper-dev-fatjar.jar server 2181 datadir
 server: java -jar target/chainreplication-1.0-spring-boot.jar nishanth 127.0.0.1:8890 127.0.0.1:2181 /control
 server on vpn: java -jar target/chainreplication-1.0-spring-boot.jar nishanth 172.27.24.15:8890 zookeeper.class.homeofcode.com /control
 test jar: arguments: -zk= test --concurrent --check-chain (reqd to log errors)
+test jar command: java -jar test-1.48.1-spring-boot.jar --zk=zookeeper.class.homeofcode.com --znode=/control
 
 client commands:
 Commands:
