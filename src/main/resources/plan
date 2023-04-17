@@ -1,0 +1,12 @@
+- DONE TODO: create the chain
+- DONE FIXME: set prec and succ by skimming thru children and setting one before as pred and one after as succ
+- DONE TODO: grpc succ and pred
+        DONE TODO: setup grpc
+        DONE TODO: send proper new succ response
+- DONE TODO: handle hashmap
+- DONE TODO: handle head service
+- TODO: handle tailservice
+- TODO: concurrent handling
+    TODO: think about where to put locks
+- TODO: handle chain debug as well
+- TODO: add a watch on parent node after handling change
