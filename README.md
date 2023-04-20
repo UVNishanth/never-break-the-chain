@@ -1,4 +1,3 @@
-# pass-by-chain
 Data storage using a chain-replication system
 
 A hashmap is used as the underlying datastore and we provide two functionalities:  
