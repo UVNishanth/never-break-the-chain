@@ -124,13 +124,14 @@ public class Main {
 
         //String name = "nishanth";
         static ZooKeeper zk;
+        static Server server;
 
 
         @Override
         public Integer call() throws Exception {
             serverPort = Integer.valueOf(serverHostPort.split(":")[1]);
             System.out.printf("listening on %d\n", serverPort);
-            var server = ServerBuilder.forPort(serverPort).intercept(new ServerInterceptor() {
+            server = ServerBuilder.forPort(serverPort).intercept(new ServerInterceptor() {
                         @Override
                         public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(ServerCall<ReqT, RespT> sc, Metadata h, ServerCallHandler<ReqT, RespT> next) {
                             var remote = sc.getAttributes().get(TRANSPORT_ATTR_REMOTE_ADDR);
@@ -363,14 +364,14 @@ public class Main {
 
 
             void sayHiToPredecessor() {
-                var server = predecessorServerInfo;
-                var lastColon = server.lastIndexOf(':');
-                var host = server.substring(0, lastColon);
-                var port = Integer.parseInt(server.substring(lastColon + 1));
-                var channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build();
-                //var channel = channelList.computeIfAbsent(server, s -> ManagedChannelBuilder.forAddress(host, port)
-                //        .usePlaintext().build());
-                var stub = ReplicaGrpc.newBlockingStub(channel);
+//                var server = predecessorServerInfo;
+//                var lastColon = server.lastIndexOf(':');
+//                var host = server.substring(0, lastColon);
+//                var port = Integer.parseInt(server.substring(lastColon + 1));
+//                var channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build();
+//                //var channel = channelList.computeIfAbsent(server, s -> ManagedChannelBuilder.forAddress(host, port)
+//                //        .usePlaintext().build());
+                var stub = ReplicaGrpc.newBlockingStub(predChannel);
                 System.out.println("Sending new predecessor a new succ req");
                 NewSuccessorResponse response = stub.withDeadlineAfter(DEADLINE, TimeUnit.SECONDS)
                         .newSuccessor(NewSuccessorRequest.newBuilder().setLastZxidSeen(lastZxidSeen).
@@ -755,30 +756,32 @@ public class Main {
             @Override
             public void debug(ChainDebugRequest request,
                               StreamObserver<ChainDebugResponse> responseObserver) {
-                try {
-                    if (lock.tryLock(LOCK_WAIT, TimeUnit.SECONDS)) {
-                        ArrayList<Integer> keys = new ArrayList<>(updateRequests.keySet());
-                        Collections.sort(keys);
-                        List<UpdateRequest> requestsList = new ArrayList<>();
-                        for (int k : keys) {
-                            requestsList.add(updateRequests.get(k));
-                        }
+                //try {
+                    //if (lock.tryLock(LOCK_WAIT, TimeUnit.SECONDS)) {
+//                        ArrayList<Integer> keys = new ArrayList<>(updateRequests.keySet());
+//                        Collections.sort(keys);
+//                        List<UpdateRequest> requestsList = new ArrayList<>();
+//                        for (int k : keys) {
+//                            requestsList.add(updateRequests.get(k));
+//                        }
+                        ArrayList<UpdateRequest> requestsList = new ArrayList<>(updateRequests.values());
                         ArrayList<String> logs = new ArrayList<String>(Arrays.asList("Sending random debug info",
                                 "Again sending random debug info"));
                         responseObserver.onNext(ChainDebugResponse.newBuilder().putAllState(hashtable)
                                 .setXid(lastXid).addAllSent(requestsList).addAllLogs(logs).build());
                         responseObserver.onCompleted();
-                        lock.unlock();
-                    }
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+                        //lock.unlock();
+                    //}
+//                } catch (InterruptedException e) {
+//                    throw new RuntimeException(e);
+//                }
             }
 
             public void exit(ExitRequest request,
                              StreamObserver<ExitResponse> responseObserver) {
                 responseObserver.onNext(ExitResponse.newBuilder().build());
                 responseObserver.onCompleted();
+                server.shutdown();
             }
         }
 
