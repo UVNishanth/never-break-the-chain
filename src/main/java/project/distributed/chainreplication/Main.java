@@ -1,55 +1,32 @@
-package edu.sjsu.cs249.chainreplication;
+package project.distributed.chainreplication;
 
-//import com.fasterxml.jackson.databind.ObjectMapper;
-//import com.google.common.collect.Lists;
-
-import edu.sjsu.cs249.chain.*;
-//import io.grpc.*;
-//import io.grpc.stub.StreamObserver;
+import project.distributed.chain.*;
 import io.grpc.stub.StreamObserver;
 import org.apache.zookeeper.*;
-//import org.json.simple.JSONObject;
-//import org.json.simple.parser.JSONParser;
-//import org.json.simple.parser.ParseException;
 import io.grpc.*;
 import org.apache.zookeeper.AsyncCallback;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooDefs;
 import org.apache.zookeeper.ZooKeeper;
-import org.apache.zookeeper.data.Stat;
-import org.checkerframework.checker.units.qual.C;
 import picocli.CommandLine;
-import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
 import java.io.*;
-import java.net.InetAddress;
 import java.net.SocketAddress;
-import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.stream.Collectors;
 
 import static io.grpc.Grpc.TRANSPORT_ATTR_REMOTE_ADDR;
 import static org.apache.zookeeper.KeeperException.Code.*;
-import static org.apache.zookeeper.KeeperException.Code.*;
 
-//
 public class Main {
     public static void main(String[] args) {
         System.exit(new CommandLine(new ServerCli()).execute(args));
     }
 
-    //
-////    @Command(subcommands = {ServerCli.class})
-////    static class Cli {
-////    }
-//
-//    @Command
     static class ServerCli implements Callable<Integer> {
-        //
         @Parameters(index = "0", description = "name")
         static String name;
 
@@ -73,7 +50,6 @@ public class Main {
         static List<String> replicas;
 
         static int lastXid = -1;
-        int lastSent = -1;
 
         static long lastZxidSeen;
         static int lastAck = -1;
@@ -107,22 +83,8 @@ public class Main {
         static ManagedChannel succChannel;
         static ManagedChannel predChannel;
 
-
-        //
-//            int waitForNextLeaderRun = 0;
-//
-//            List<String> lunchmates;
-//
-//            String leaderName;
-//
-//            // TODO: DONE: Use Multimap instead of hashmap
-//            LinkedHashMap<Long, HashMap<String, String>> myLunchHistory = new LinkedHashMap<>();
-//
-//
-        static String hostname;
         static String serverInfo = "";
 
-        //String name = "nishanth";
         static ZooKeeper zk;
         static Server server;
 
@@ -149,10 +111,6 @@ public class Main {
             var xid = ack.getXid();
             updateRequests.remove(xid);
             lastAck = xid;
-//                if(lastAck != xid){
-//                    System.out.println("my lastAck is "+(lastAck > xid ?
-//                            "greater " : "smaller ")+ "than my succ which is incorrect");
-//                }
             System.out.println("lastXid Value: " + lastXid);
             System.out.println("Pending requests after ack: ");
             System.out.println(updateRequests);
@@ -160,8 +118,6 @@ public class Main {
                 var ackXid = ack.getXid();
                 System.out.println("ackXid: " + ackXid);
                 System.out.println("Sending ack for " + ackXid + " to the client...");
-                //System.out.println("Response Map list: ");
-                //System.out.println(responseObserverMap);
                 StreamObserver<HeadResponse> responseToClient = responseObserverMap.get(ackXid);
                 responseToClient.onNext(HeadResponse.newBuilder().setRc(0).build());
                 responseToClient.onCompleted();
@@ -174,9 +130,6 @@ public class Main {
 
         static void sendUpdateRequestToSuccessor(UpdateRequest req) {
             var stub = ReplicaGrpc.newBlockingStub(succChannel);
-//            if(lock.isHeldByCurrentThread()){
-//                lock.unlock();
-//            }
 
             UpdateResponse response = stub.withDeadlineAfter(DEADLINE, TimeUnit.SECONDS)
                     .update(req);
@@ -200,25 +153,19 @@ public class Main {
                 System.out.println("I am the tail.. So sending Ack for request back to pred");
                 AckRequest ack = AckRequest.newBuilder().setXid(lastAck).build();
                 handleAckRequest(ack);
-                //sendAckRequestToPredecessor(ack);
             }
         }
 
         static void sendAckRequestToPredecessor(AckRequest req) {
             var stub = ReplicaGrpc.newBlockingStub(predChannel);
-//                if(lock.isHeldByCurrentThread()){
-//                    lock.unlock();
-//                }
             AckResponse response = stub.withDeadlineAfter(DEADLINE, TimeUnit.SECONDS)
                     .ack(req);
 
         }
 
 
-        //
+
         static class ChainReplicaService extends ReplicaGrpc.ReplicaImplBase {
-            //
-//
 
             public ChainReplicaService() throws IOException {
 
@@ -243,8 +190,6 @@ public class Main {
                 } else if (KeeperException.Code.get(rc) == NODEEXISTS) {
                     System.out.println("/" + controlpath + " node already exists");
                 }
-//                    default -> {
-//                    }
                 addToChain();
             };
 
@@ -269,16 +214,7 @@ public class Main {
             };
 
             void getReplicaList() {
-                //try {
-                //if(lock.tryLock(50, TimeUnit.SECONDS)) {
                 zk.getChildren(controlpath, replicaListWatcher, getReplicaListCallback, null);
-//                    }
-//                } catch (InterruptedException e) {
-//                    throw new RuntimeException(e);
-//                }
-//                finally {
-//                    lock.unlock();
-//                }
             }
 
             Watcher replicaListWatcher = e -> {
@@ -291,20 +227,12 @@ public class Main {
                 } catch (InterruptedException ex) {
                     throw new RuntimeException(ex);
                 }
-//                if (e.getType() == Watcher.Event.EventType.NodeDeleted) {
-//                    getLunchChildren();
-//                } else if (e.getType() == Watcher.Event.EventType.NodeCreated) {
-//                    // TODO: check if /lunchtime already present if so, then show below prompt
-//                    System.out.println("Cannot create new node in /lunch when lunchtime is in session");
-//                }
             };
 
 
             AsyncCallback.Children2Callback getReplicaListCallback = (rc, path, ctx, children, stat) -> {
                 switch (KeeperException.Code.get(rc)) {
                     case CONNECTIONLOSS -> getReplicaList();
-                    /*Will not happen unless the client acts as an adversary because the leader will always
-                     * have its name in the lunch roster*/
                     case NONODE -> {
                         System.out.println(controlpath + " died. Restarting setup...");
                         createControlNode();
@@ -312,14 +240,9 @@ public class Main {
                     case OK -> {
                         lastZxidSeen = stat.getPzxid();
                         System.out.println("lastZxid seen: " + lastZxidSeen);
-                        //System.out.println("Leader (aka me) got info of my lunchmates");
-                        // As lunch children will also have employees znode, we need to filter that out
                         children.removeIf(znode -> !znode.startsWith("replica-"));
                         replicas = children;
-
                         sortReplicaList();
-
-                        //lock.unlock();
                         int replicaSize = children.size();
                         System.out.println("ReplicaSize: " + replicaSize);
                         System.out.println("replica list: " + replicas);
@@ -339,9 +262,6 @@ public class Main {
                         if (!isHead) {
                             getPredecessor(myPositionInTheChain);
                             if (predecessorChanged) {
-//                                if(lock.isHeldByCurrentThread()){
-//                                    lock.unlock();
-//                                }
                                 sayHiToPredecessor();
                             }
                         }
@@ -364,13 +284,6 @@ public class Main {
 
 
             void sayHiToPredecessor() {
-//                var server = predecessorServerInfo;
-//                var lastColon = server.lastIndexOf(':');
-//                var host = server.substring(0, lastColon);
-//                var port = Integer.parseInt(server.substring(lastColon + 1));
-//                var channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build();
-//                //var channel = channelList.computeIfAbsent(server, s -> ManagedChannelBuilder.forAddress(host, port)
-//                //        .usePlaintext().build());
                 var stub = ReplicaGrpc.newBlockingStub(predChannel);
                 System.out.println("Sending new predecessor a new succ req");
                 NewSuccessorResponse response = stub.withDeadlineAfter(DEADLINE, TimeUnit.SECONDS)
@@ -385,7 +298,6 @@ public class Main {
                     return;
                 }
                 if (response.getRc() == 0) {
-                    //hashtable = (HashMap<String, Integer>) response.getStateMap();
                     System.out.println("Predecessor has accepted that I am the new tail");
                     hashtable.putAll(response.getStateMap());
                 }
@@ -427,16 +339,12 @@ public class Main {
                 }
                 predecessorChanged = true;
                 System.out.println("I have a new predecessor. Have to initiate contact...");
-                //String predServerData;
                 try {
                     predecessorServerInfo = getReplicaServerInfo(predecessorReplicaName,
                             false);
                 } catch (InterruptedException | KeeperException e) {
                     throw new RuntimeException(e);
                 }
-
-                //predecessorServerInfo = predServerData.split("\n")[0];
-
                 System.out.println("Pred Server Info: " + predecessorServerInfo);
 
                 var server = predecessorServerInfo;
@@ -467,7 +375,6 @@ public class Main {
                 }
                 successorChanged = true;
                 System.out.println("I have a new successor");
-                //String succServerData;
                 try {
                     successorServerInfo = getReplicaServerInfo(successorReplicaName,
                             true);
@@ -476,9 +383,6 @@ public class Main {
                 } catch (KeeperException e) {
                     throw new RuntimeException(e);
                 }
-
-                //successorServerInfo = succServerData.split("\n")[0];
-
                 System.out.println("Succ Server Info: " + successorServerInfo);
 
                 var server = successorServerInfo;
@@ -516,12 +420,6 @@ public class Main {
                 } catch (InterruptedException ex) {
                     throw new RuntimeException(ex);
                 }
-//                if (e.getType() == Watcher.Event.EventType.NodeDeleted) {
-//                    getLunchChildren();
-//                } else if (e.getType() == Watcher.Event.EventType.NodeCreated) {
-//                    // TODO: check if /lunchtime already present if so, then show below prompt
-//                    System.out.println("Cannot create new node in /lunch when lunchtime is in session");
-//                }
             };
 
             Watcher predecessorWatcher = e -> {
@@ -534,12 +432,6 @@ public class Main {
                 } catch (InterruptedException ex) {
                     throw new RuntimeException(ex);
                 }
-//                if (e.getType() == Watcher.Event.EventType.NodeDeleted) {
-//                    getLunchChildren();
-//                } else if (e.getType() == Watcher.Event.EventType.NodeCreated) {
-//                    // TODO: check if /lunchtime already present if so, then show below prompt
-//                    System.out.println("Cannot create new node in /lunch when lunchtime is in session");
-//                }
             };
 
 
@@ -564,9 +456,6 @@ public class Main {
                                 responseRc = -1;
                             }
                         }
-//                        else {
-//                            getReplicaList();
-//                        }
                         System.out.println("Setting successor via chain...");
                         getSuccessor(replicas.indexOf(znodeName));
                         if (responseRc != -1 && request.getLastXid() == -1) {
@@ -586,7 +475,6 @@ public class Main {
                                 responseUpdateRequestList.add(updateRequests.get(sendFrom));
                             }
                             var reqLastAck = request.getLastAck();
-                            //var ackFrom = lastAck + 1;
                             for (var ackFrom = lastAck + 1; ackFrom <= reqLastAck; ackFrom++) {
                                 AckRequest ack = AckRequest.newBuilder().setXid(lastAck).build();
                                 handleAckRequest(ack);
@@ -604,35 +492,11 @@ public class Main {
                     }
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
-                } finally {
                 }
             }
 
             AsyncCallback.VoidCallback syncCallback = (rc, path, ctx) -> {
-                //getReplicaList();
             };
-
-//            void handleRequest(UpdateRequest req){
-//                var key = req.getKey();
-//                var newVal = req.getNewValue();
-//                var xid = req.getXid();
-//                hashtable.put(key, newVal);
-//                updateRequests.put(xid, req);
-//                System.out.println("Updated hash table: \n"+hashtable);
-//                lastXid = req.getXid();
-//                System.out.println("lastXid Value: "+lastXid);
-//            }
-//
-//            void handleAckRequest(AckRequest ack){
-//                var xid = ack.getXid();
-//                updateRequests.remove(xid);
-//                lastAck = xid;
-////                if(lastAck != xid){
-////                    System.out.println("my lastAck is "+(lastAck > xid ?
-////                            "greater " : "smaller ")+ "than my succ which is incorrect");
-////                }
-//                System.out.println("lastXid Value: "+lastXid);
-//            }
 
             @Override
             public void update(UpdateRequest request,
@@ -699,25 +563,19 @@ public class Main {
                             oldValue = hashtable.get(keyToBeUpdated);
                         }
                         var newValue = oldValue + incValue;
-//                hashtable.put(keyToBeUpdated, newValue);
-                        //System.out.println("Value updated. Now sending down the chain...");
                         UpdateRequest req = UpdateRequest.newBuilder().setKey(keyToBeUpdated).setNewValue(newValue)
                                 .setXid(lastXid).build();
                         responseObserverMap.put(lastXid, responseObserver);
                         handleRequest(req);
-                        //sendUpdateRequestToSuccessor(req);
                         lock.unlock();
                     }
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
-                } finally {
-
                 }
             }
         }
 
         static class TailChainReplicaService extends TailChainReplicaGrpc.TailChainReplicaImplBase {
-
 
             public TailChainReplicaService() throws IOException {
                 System.out.println("Starting TailChainReplicaService...");
@@ -734,11 +592,9 @@ public class Main {
                     return;
                 }
                 var value = 0;
-                //TODO: after getting update request, if i am tail, i need to send ack request back
                 if (hashtable.containsKey(request.getKey())) {
                     value = hashtable.get(request.getKey());
                 }
-//                hashtable.put(keyToBeUpdated, newValue);
                 System.out.println("I am indeed the tail. Sending response to client...");
                 responseObserver.onNext(GetResponse.newBuilder().setRc(0).setValue(value).build());
                 responseObserver.onCompleted();
@@ -748,7 +604,6 @@ public class Main {
 
         static class ChainDebugService extends ChainDebugGrpc.ChainDebugImplBase {
 
-
             public ChainDebugService() throws IOException {
                 System.out.println("Starting ChainDebugService...");
             }
@@ -756,25 +611,12 @@ public class Main {
             @Override
             public void debug(ChainDebugRequest request,
                               StreamObserver<ChainDebugResponse> responseObserver) {
-                //try {
-                    //if (lock.tryLock(LOCK_WAIT, TimeUnit.SECONDS)) {
-//                        ArrayList<Integer> keys = new ArrayList<>(updateRequests.keySet());
-//                        Collections.sort(keys);
-//                        List<UpdateRequest> requestsList = new ArrayList<>();
-//                        for (int k : keys) {
-//                            requestsList.add(updateRequests.get(k));
-//                        }
                         ArrayList<UpdateRequest> requestsList = new ArrayList<>(updateRequests.values());
                         ArrayList<String> logs = new ArrayList<String>(Arrays.asList("Sending random debug info",
                                 "Again sending random debug info"));
                         responseObserver.onNext(ChainDebugResponse.newBuilder().putAllState(hashtable)
                                 .setXid(lastXid).addAllSent(requestsList).addAllLogs(logs).build());
                         responseObserver.onCompleted();
-                        //lock.unlock();
-                    //}
-//                } catch (InterruptedException e) {
-//                    throw new RuntimeException(e);
-//                }
             }
 
             public void exit(ExitRequest request,
@@ -784,7 +626,5 @@ public class Main {
                 server.shutdown();
             }
         }
-
-
     }
 }
