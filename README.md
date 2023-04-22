@@ -9,3 +9,4 @@ System is concurrency-resilient and also heals the chain when a node goes down o
 The following line adds a node running at {grpc_host_and_port} to the chain <br>
 <code>java -jar chainreplication.jar your_name grpc_host_port zookeeper_host_port_list control_path</code>
 
+Protobuf files have been provided to build a client. <code>chain.proto</code> gives the request structure to access the chain for data. <code>chain_debug.proto</code> provides debugging requests to the chain to get a snapshot of the hashmap at any given time or to kill a server in the chain.
