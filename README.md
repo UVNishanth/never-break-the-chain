@@ -1,4 +1,4 @@
-Data storage using a chain-replication system
+Distributed hash store in a chain-replication system
 
 A hashmap is used as the underlying datastore and we provide two functionalities:  
 <code>get(key) - to fetch the value of the key from the hashmap</code><br>
