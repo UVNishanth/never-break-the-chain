@@ -1,8 +1,0 @@
-Coding Rulebook
-* Never Nester
-    * Max depth = 3 (includes function)
-    * To avoid more, use:
-        * Extraction: create a diff function to handle the depth
-        * Inversion: move unhappy part in the ‘if’ and return, so that you can write happy part below without using an else, below
-* Avoid comments
-    * Instead, let your code speak for itself by naming things based on what they are supposed to be
